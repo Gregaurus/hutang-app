@@ -148,7 +148,11 @@ const CKEY = 'catatanHutang_config';   // URL + PIN
 
 let data = JSON.parse(localStorage.getItem(KEY) || '{"people":[],"history":[]}');
 let queue = JSON.parse(localStorage.getItem(QKEY) || '[]');
+// URL default untuk Web App (Apps Script) yang sudah dibuat
+const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbzvXfOCzJ9M559B9ewN1A30jKmexOVy0wWNHsx60MEIa7SyjkRaK1pzJtICfajyjvBD/exec';
 let config = JSON.parse(localStorage.getItem(CKEY) || '{"url":"","pin":""}');
+if (!config.url) config.url = DEFAULT_URL;
+
 let selected = new Set();
 let syncing = false;
 
