@@ -22,6 +22,7 @@
   .btn{background:#2563eb;color:#fff;width:100%;margin-top:12px}
   .btn-sm{padding:8px 10px;font-size:13px}
   .btn-green{background:#16a34a;color:#fff}
+  .btn-blue{background:#2563eb;color:#fff}
   .btn-red{background:#fee2e2;color:#b91c1c}
   .btn-gray{background:#e2e8f0;color:#0f172a}
   .row{display:flex;gap:8px;align-items:center}
@@ -51,7 +52,22 @@
   .pending{font-size:12px;color:#b45309;background:#fef3c7;border-radius:8px;padding:4px 8px;margin-top:4px;display:inline-block}
   .paybox{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
   .paybox input{width:22px;height:22px}
-  .actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+  /* Info transfer */
+  .bank{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:14px;padding:14px}
+  .bank .bname{font-size:13px;opacity:.85;font-weight:600;letter-spacing:.5px}
+  .bank .bnum{font-size:24px;font-weight:800;letter-spacing:1.5px;margin:4px 0}
+  .bank .bholder{font-size:13px;opacity:.9}
+  .bank .row{margin-top:10px}
+  .bank button{background:rgba(255,255,255,.2);color:#fff}
+  /* Modal */
+  .modal{position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:flex-end;justify-content:center;z-index:20}
+  .modal.show{display:flex}
+  .sheet{background:#fff;width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:18px 16px 24px;max-height:90vh;overflow:auto}
+  .sheet h3{font-size:17px;margin-bottom:4px}
+  .bigamt{font-size:28px;font-weight:800;color:#dc2626;margin:6px 0 12px}
+  .steps{font-size:13px;color:#475569;line-height:1.7;margin-top:12px;padding-left:18px}
+  .toast{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 16px;border-radius:20px;font-size:14px;display:none;z-index:30}
   /* Mode lihat saja (tanpa PIN) */
   body.readonly .edit-only{display:none !important}
   body:not(.readonly) .view-only{display:none !important}
@@ -69,7 +85,7 @@
 </header>
 
 <main>
-  <div class="ro-badge">👀 Mode lihat saja. Centang <b>Sudah bayar</b> kalau kamu sudah transfer, nanti dikonfirmasi pemilik.</div>
+  <div class="ro-badge">👀 Mode lihat saja. Klik <b>💳 Bayar</b> untuk info transfer, lalu tandai <b>Sudah bayar</b>. Nanti dikonfirmasi pemilik.</div>
   <div class="banner" id="setupBanner">Belum terhubung ke Google Sheets. Data masih tersimpan di HP saja. Atur di tab <b>⚙️ Atur</b>.</div>
 
   <!-- TRANSAKSI (khusus pemilik) -->
@@ -114,6 +130,15 @@
       <div id="recapList"></div>
     </div>
     <div class="card">
+      <h2>💳 Info Transfer</h2>
+      <div class="bank">
+        <div class="bname" id="bankName"></div>
+        <div class="bnum" id="bankNumber"></div>
+        <div class="bholder" id="bankHolder"></div>
+        <div class="row"><button class="btn-sm" style="flex:1" onclick="copyText(BANK.number, 'No. rekening disalin')">📋 Salin No. Rekening</button></div>
+      </div>
+    </div>
+    <div class="card">
       <h2>Riwayat</h2>
       <div id="historyList"></div>
     </div>
@@ -147,6 +172,32 @@
   </section>
 </main>
 
+<!-- POPUP BAYAR -->
+<div class="modal" id="payModal" onclick="if(event.target===this)closePay()">
+  <div class="sheet">
+    <h3 id="payTitle">Bayar hutang</h3>
+    <div class="sub">Sisa hutang</div>
+    <div class="bigamt" id="payAmount">Rp0</div>
+    <div class="bank">
+      <div class="bname" id="mBankName"></div>
+      <div class="bnum" id="mBankNumber"></div>
+      <div class="bholder" id="mBankHolder"></div>
+      <div class="row">
+        <button class="btn-sm" style="flex:1" onclick="copyText(BANK.number, 'No. rekening disalin')">📋 Salin No. Rek</button>
+        <button class="btn-sm" style="flex:1" onclick="copyText(String(payCtx.amount), 'Nominal disalin')">📋 Salin Nominal</button>
+      </div>
+    </div>
+    <ol class="steps">
+      <li>Transfer sesuai nominal di atas ke rekening tersebut.</li>
+      <li>Setelah berhasil, klik <b>Saya sudah transfer</b>.</li>
+      <li>Pemilik akan mengecek & mengonfirmasi.</li>
+    </ol>
+    <button class="btn btn-green" id="payDoneBtn" onclick="payDone()">✓ Saya sudah transfer</button>
+    <button class="btn btn-gray" onclick="closePay()">Tutup</button>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
 <nav class="tabs">
   <button class="edit-only" data-page="trx"><span>🧾</span>Transaksi</button>
   <button data-page="people"><span>👥</span>Orang</button>
@@ -155,6 +206,9 @@
 </nav>
 
 <script>
+/* ================= Info rekening tujuan transfer ================= */
+const BANK = { name: 'BCA', number: '6043625841', holder: 'A.N. Gregorius V.A.' };
+
 /* ================= Storage lokal (cache) ================= */
 const KEY = 'catatanHutang_v1';        // data (cache)
 const QKEY = 'catatanHutang_queue';    // antrian perubahan yang belum terkirim
@@ -176,6 +230,7 @@ if (!deviceId) { deviceId = 'd' + Date.now().toString(36) + Math.random().toStri
 let selected = new Set();
 let syncing = false;
 let busy = false; // untuk aksi publik (tandai sudah bayar)
+let payCtx = { pid: null, amount: 0 };
 
 const isReadonly = () => !config.pin;
 const save = () => localStorage.setItem(KEY, JSON.stringify(data));
@@ -192,6 +247,31 @@ data.history.forEach(h => {
   if (h.type === 'trx') h.shares.forEach(s => { if (!s.name) s.name = personName(s.id); });
   if (h.type === 'pay' && !h.name) h.name = personName(h.personId);
 });
+
+/* ================= Utilitas: salin & toast ================= */
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.style.display = 'none', 1800);
+}
+async function copyText(text, msg) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+  }
+  toast('✓ ' + (msg || 'Disalin'));
+}
+function fillBank() {
+  ['', 'm'].forEach(pre => {
+    const k = s => document.getElementById(pre ? pre + s : s.charAt(0).toLowerCase() + s.slice(1));
+    k('BankName').textContent = BANK.name;
+    k('BankNumber').textContent = BANK.number.replace(/(\d{4})(?=\d)/g, '$1 ');
+    k('BankHolder').textContent = BANK.holder;
+  });
+}
 
 /* ================= Sinkronisasi Google Sheets ================= */
 function setStatus(text) { document.getElementById('syncBtn').textContent = text; }
@@ -452,20 +532,47 @@ async function publicAction(payload) {
     await pull(true);
   }
 }
+function submitPaid(pid) {
+  const bal = balances()[pid];
+  if (bal <= 0 || pendingFor(pid)) return;
+  const r = { id: uid(), personId: pid, name: personName(pid), amount: bal, date: Date.now(), mine: true };
+  data.requests.push(r); render();
+  publicAction({ action: 'requestPay', req: { ...r, device: deviceId } });
+}
 function togglePaid(pid, checkbox) {
   const req = pendingFor(pid);
   if (checkbox.checked) {
     const bal = balances()[pid];
     if (!confirm(`Tandai ${personName(pid)} sudah bayar ${rp(bal)}?\nPemilik akan mengonfirmasi dulu.`)) { checkbox.checked = false; return; }
-    const r = { id: uid(), personId: pid, name: personName(pid), amount: bal, date: Date.now(), mine: true };
-    data.requests.push(r); render();
-    publicAction({ action: 'requestPay', req: { ...r, device: deviceId } });
+    submitPaid(pid);
   } else {
     if (!req) return;
     if (!confirm('Batalkan tanda sudah bayar?')) { checkbox.checked = true; return; }
     data.requests = data.requests.filter(x => x.id !== req.id); render();
     publicAction({ action: 'cancelRequest', id: req.id });
   }
+}
+
+// Popup bayar (info transfer)
+function openPay(pid) {
+  const bal = balances()[pid];
+  if (bal <= 0) return;
+  payCtx = { pid, amount: bal };
+  document.getElementById('payTitle').textContent = `Bayar hutang ${personName(pid)}`;
+  document.getElementById('payAmount').textContent = rp(bal);
+  const done = document.getElementById('payDoneBtn');
+  // Tombol "sudah transfer" hanya untuk user tanpa PIN (pemilik pakai tombol Bayar biasa)
+  done.style.display = isReadonly() && !pendingFor(pid) ? 'block' : 'none';
+  document.getElementById('payModal').classList.add('show');
+}
+function closePay() { document.getElementById('payModal').classList.remove('show'); }
+function payDone() {
+  const { pid, amount } = payCtx;
+  if (!pid) return;
+  if (!confirm(`Konfirmasi: kamu sudah transfer ${rp(amount)} untuk ${personName(pid)}?`)) return;
+  closePay();
+  submitPaid(pid);
+  toast('✓ Terkirim, menunggu konfirmasi pemilik');
 }
 
 // Pemilik: konfirmasi / tolak
@@ -553,13 +660,16 @@ function recapRow(p, bal) {
   if (req) pendingInfo = `<div class="pending">⏳ Klaim sudah bayar ${rp(req.amount)} · menunggu konfirmasi</div>`;
 
   if (ro) {
-    // User biasa: centang "Sudah bayar" (bisa dibatalkan dari HP yang sama)
+    // User biasa: tombol 💳 Bayar (info transfer) + centang "Sudah bayar"
+    const parts = [];
     if (req) {
-      right = `<label class="paybox"><input type="checkbox" checked ${req.mine ? '' : 'disabled'}
-        onchange="togglePaid('${p.id}', this)" ${busy ? 'disabled' : ''}> Sudah bayar</label>`;
+      parts.push(`<label class="paybox"><input type="checkbox" checked ${req.mine && !busy ? '' : 'disabled'}
+        onchange="togglePaid('${p.id}', this)"> Sudah bayar</label>`);
     } else if (bal > 0) {
-      right = `<label class="paybox"><input type="checkbox" onchange="togglePaid('${p.id}', this)" ${busy ? 'disabled' : ''}> Sudah bayar</label>`;
+      parts.push(`<button class="btn-sm btn-blue" onclick="openPay('${p.id}')">💳 Bayar</button>`);
+      parts.push(`<label class="paybox"><input type="checkbox" onchange="togglePaid('${p.id}', this)" ${busy ? 'disabled' : ''}> Sudah bayar</label>`);
     }
+    right = `<div class="actions">${parts.join('')}</div>`;
   } else {
     // Pemilik
     const btns = [];
@@ -620,6 +730,7 @@ function render() {
 }
 
 // Halaman awal: pemilik → Transaksi, tanpa PIN → Rekap
+fillBank();
 openTab(isReadonly() ? 'recap' : 'trx');
 updateStatus();
 pull(true); // ambil data terbaru dari Sheet saat app dibuka
