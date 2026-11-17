@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#2563eb">
+<title>Catatan Hutang</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,Segoe UI,Roboto,sans-serif}
+  body{background:#f1f5f9;color:#0f172a;padding-bottom:80px}
+  header{background:#2563eb;color:#fff;padding:14px 16px;position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center;gap:10px}
+  header h1{font-size:20px}
+  header p{font-size:13px;opacity:.85;margin-top:2px}
+  #syncBtn{background:rgba(255,255,255,.18);color:#fff;font-size:12px;padding:8px 10px;white-space:nowrap}
+  main{padding:14px;max-width:560px;margin:auto}
+  .card{background:#fff;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .card h2{font-size:16px;margin-bottom:10px}
+  label{font-size:13px;color:#475569;display:block;margin:8px 0 4px}
+  input[type=text],input[type=tel],input[type=url],input[type=password]{width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font-size:16px}
+  button{border:0;border-radius:10px;padding:12px 14px;font-size:15px;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.5}
+  .btn{background:#2563eb;color:#fff;width:100%;margin-top:12px}
+  .btn-sm{padding:8px 10px;font-size:13px}
+  .btn-green{background:#16a34a;color:#fff}
+  .btn-red{background:#fee2e2;color:#b91c1c}
+  .btn-gray{background:#e2e8f0;color:#0f172a}
+  .row{display:flex;gap:8px;align-items:center}
+  .row input{flex:1}
+  .list-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9;gap:8px}
+  .list-item:last-child{border-bottom:0}
+  .name{font-weight:600}
+  .sub{font-size:12px;color:#64748b;margin-top:2px}
+  .amt{font-weight:700;white-space:nowrap}
+  .pos{color:#dc2626}.zero{color:#16a34a}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{padding:9px 13px;border-radius:20px;border:1px solid #cbd5e1;background:#fff;font-size:14px;user-select:none}
+  .chip.on{background:#2563eb;color:#fff;border-color:#2563eb}
+  .summary{background:#eff6ff;border-radius:10px;padding:10px;margin-top:12px;font-size:14px;line-height:1.6}
+  .total{font-size:26px;font-weight:800;color:#dc2626}
+  .tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;display:flex;border-top:1px solid #e2e8f0;z-index:5}
+  .tabs button{flex:1;background:none;border-radius:0;padding:12px 4px;font-size:12px;color:#64748b;font-weight:500}
+  .tabs button span{display:block;font-size:20px}
+  .tabs button.active{color:#2563eb;font-weight:700}
+  .page{display:none}.page.active{display:block}
+  .empty{color:#94a3b8;font-size:14px;text-align:center;padding:12px}
+  .check{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px}
+  .check input{width:20px;height:20px}
+  .note{font-size:12px;color:#64748b;margin-top:8px;line-height:1.5}
+  .banner{background:#fef3c7;color:#92400e;font-size:13px;padding:10px;border-radius:10px;margin-bottom:12px;display:none}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>💸 Catatan Hutang</h1>
+    <p id="headerTotal">Total piutang: Rp0</p>
+  </div>
+  <button id="syncBtn" onclick="syncNow()">⟳ Sync</button>
+</header>
+
+<main>
+  <div class="banner" id="setupBanner">Belum terhubung ke Google Sheets. Data masih tersimpan di HP saja. Atur di tab <b>⚙️ Atur</b>.</div>
+
+  <!-- TRANSAKSI -->
+  <section class="page active" id="page-trx">
+    <div class="card">
+      <h2>Transaksi Baru</h2>
+      <label>Keterangan</label>
+      <input type="text" id="trxDesc" placeholder="cth: Makan siang">
+      <label>Total nominal (Rp)</label>
+      <input type="tel" id="trxAmount" placeholder="0" inputmode="numeric">
+      <label>Siapa yang ikut patungan?</label>
+      <div class="chips" id="trxPeople"></div>
+      <label class="check"><input type="checkbox" id="trxIncludeMe" checked> Saya juga ikut bayar bagian (dihitung 1 orang)</label>
+      <div class="summary" id="trxSummary">Pilih orang & isi nominal.</div>
+      <button class="btn" onclick="addTransaction()">Simpan Transaksi</button>
+    </div>
+  </section>
+
+  <!-- ORANG -->
+  <section class="page" id="page-people">
+    <div class="card">
+      <h2>Tambah Orang</h2>
+      <div class="row">
+        <input type="text" id="personName" placeholder="Nama orang">
+        <button class="btn-green" onclick="addPerson()">+</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Daftar Orang</h2>
+      <div id="peopleList"></div>
+    </div>
+  </section>
+
+  <!-- REKAP -->
+  <section class="page" id="page-recap">
+    <div class="card">
+      <h2>Total Semua Hutang</h2>
+      <div class="total" id="recapTotal">Rp0</div>
+    </div>
+    <div class="card">
+      <h2>Rekap per Orang</h2>
+      <div id="recapList"></div>
+    </div>
+    <div class="card">
+      <h2>Riwayat</h2>
+      <div id="historyList"></div>
+    </div>
+  </section>
+
+  <!-- PENGATURAN -->
+  <section class="page" id="page-settings">
+    <div class="card">
+      <h2>Google Sheets</h2>
+      <label>URL Web App (Apps Script)</label>
+      <input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec">
+      <label>PIN (kosongkan kalau tidak pakai)</label>
+      <input type="password" id="cfgPin" placeholder="PIN" inputmode="numeric">
+      <button class="btn" onclick="saveSettings()">Simpan & Hubungkan</button>
+      <p class="note" id="cfgStatus"></p>
+    </div>
+    <div class="card">
+      <h2>Data</h2>
+      <div class="row">
+        <button class="btn-gray" style="flex:1" onclick="exportData()">Backup</button>
+        <button class="btn-gray" style="flex:1" onclick="document.getElementById('importFile').click()">Restore</button>
+        <button class="btn-red" style="flex:1" onclick="resetAll()">Reset</button>
+      </div>
+      <button class="btn btn-gray" onclick="pushLocal()">⬆ Kirim semua data di HP ini ke Sheet</button>
+      <p class="note">Restore, Reset, dan "Kirim semua data" akan <b>menimpa</b> isi Sheet.</p>
+      <input type="file" id="importFile" accept=".json" hidden onchange="importData(event)">
+    </div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button class="active" data-page="trx"><span>🧾</span>Transaksi</button>
+  <button data-page="people"><span>👥</span>Orang</button>
+  <button data-page="recap"><span>📊</span>Rekap</button>
+  <button data-page="settings"><span>⚙️</span>Atur</button>
+</nav>
+
+<script>
+/* ================= Storage lokal (cache) ================= */
+const KEY = 'catatanHutang_v1';        // data (cache)
+const QKEY = 'catatanHutang_queue';    // antrian perubahan yang belum terkirim
+const CKEY = 'catatanHutang_config';   // URL + PIN
+
+let data = JSON.parse(localStorage.getItem(KEY) || '{"people":[],"history":[]}');
+let queue = JSON.parse(localStorage.getItem(QKEY) || '[]');
+let config = JSON.parse(localStorage.getItem(CKEY) || '{"url":"","pin":""}');
+let selected = new Set();
+let syncing = false;
+
+const save = () => localStorage.setItem(KEY, JSON.stringify(data));
+const saveQueue = () => localStorage.setItem(QKEY, JSON.stringify(queue));
+const rp = n => 'Rp' + Math.round(n).toLocaleString('id-ID');
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const parseNum = s => Number(String(s).replace(/[^\d]/g,'')) || 0;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtDate = t => new Date(t).toLocaleString('id-ID',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+
+// Migrasi data versi lama (nama belum tersimpan di riwayat)
+data.history.forEach(h => {
+  if (h.type === 'trx') h.shares.forEach(s => { if (!s.name) s.name = personName(s.id); });
+  if (h.type === 'pay' && !h.name) h.name = personName(h.personId);
+});
+
+/* ================= Sinkronisasi Google Sheets ================= */
+function setStatus(text) { document.getElementById('syncBtn').textContent = text; }
+
+function updateStatus() {
+  document.getElementById('setupBanner').style.display = config.url ? 'none' : 'block';
+  if (!config.url) return setStatus('⚠ Lokal');
+  if (syncing) return setStatus('⏳ Menyimpan…');
+  if (queue.length) return setStatus(`⚠ ${queue.length} belum terkirim`);
+  setStatus('✓ Tersimpan');
+}
+
+async function api(method, payload) {
+  let res;
+  if (method === 'GET') {
+    res = await fetch(`${config.url}?pin=${encodeURIComponent(config.pin || '')}&t=${Date.now()}`);
+  } else {
+    // text/plain supaya tidak kena CORS preflight di Apps Script
+    res = await fetch(config.url, { method: 'POST', body: JSON.stringify({ ...payload, pin: config.pin }) });
+  }
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || 'Gagal');
+  return json;
+}
+
+// Tambah perubahan ke antrian lalu kirim
+function enqueue(op) { queue.push(op); saveQueue(); flush(); }
+
+// Kirim antrian satu per satu (urut), berhenti kalau gagal & coba lagi nanti
+async function flush() {
+  if (syncing || !config.url || !queue.length) return updateStatus();
+  syncing = true; updateStatus();
+  try {
+    while (queue.length) {
+      await api('POST', queue[0]);
+      queue.shift(); saveQueue();
+    }
+  } catch (e) {
+    console.warn('Sync gagal:', e);
+    if (String(e.message).includes('PIN')) alert('PIN salah. Cek di tab Atur.');
+  } finally {
+    syncing = false; updateStatus();
+  }
+}
+
+// Ambil data terbaru dari Sheet (setelah antrian terkirim)
+async function pull(silent) {
+  if (!config.url) return;
+  await flush();
+  if (queue.length) return; // masih ada yang belum terkirim, jangan timpa data lokal
+  try {
+    syncing = true; setStatus('⏳ Memuat…');
+    const res = await api('GET');
+    data = res.data; save(); render();
+  } catch (e) {
+    if (!silent) alert('Gagal memuat dari Sheet: ' + e.message);
+  } finally {
+    syncing = false; updateStatus();
+  }
+}
+
+function syncNow() {
+  if (!config.url) { openTab('settings'); return; }
+  pull(false);
+}
+
+async function saveSettings() {
+  const url = document.getElementById('cfgUrl').value.trim();
+  const pin = document.getElementById('cfgPin').value.trim();
+  const st = document.getElementById('cfgStatus');
+  if (url && !/^https:\/\/script\.google\.com\/.+\/exec/.test(url)) {
+    st.textContent = '❌ URL harus berakhiran /exec dari Apps Script Web App.'; return;
+  }
+  config = { url, pin }; localStorage.setItem(CKEY, JSON.stringify(config));
+  if (!url) { st.textContent = 'Mode lokal (tidak tersambung).'; updateStatus(); return; }
+
+  st.textContent = '⏳ Mengecek koneksi…';
+  try {
+    const res = await api('GET');
+    const remoteEmpty = !res.data.people.length && !res.data.history.length;
+    const localHasData = data.people.length || data.history.length;
+    if (remoteEmpty && localHasData && confirm('Sheet masih kosong. Kirim data yang ada di HP ini ke Sheet?')) {
+      queue = [{ action: 'replaceAll', data }]; saveQueue();
+      await flush();
+    } else {
+      queue = []; saveQueue();
+      data = res.data; save();
+    }
+    st.textContent = '✅ Terhubung ke Google Sheets.';
+    render();
+  } catch (e) {
+    st.textContent = '❌ Gagal terhubung: ' + e.message;
+  }
+  updateStatus();
+}
+
+window.addEventListener('online', flush);
+
+/* ================= Logika hutang ================= */
+function balances() {
+  const b = {};
+  data.people.forEach(p => b[p.id] = 0);
+  data.history.forEach(h => {
+    if (h.type === 'trx') h.shares.forEach(s => { if (s.id in b) b[s.id] += Number(s.amount); });
+    if (h.type === 'pay' && h.personId in b) b[h.personId] -= Number(h.amount);
+  });
+  return b;
+}
+function personName(id) {
+  const p = (data.people || []).find(p => p.id === id);
+  return p ? p.name : '(dihapus)';
+}
+
+// Tabs
+function openTab(page) {
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + page));
+  render();
+}
+document.querySelectorAll('.tabs button').forEach(btn => btn.onclick = () => openTab(btn.dataset.page));
+
+// Input nominal otomatis pakai titik ribuan
+const amtInput = document.getElementById('trxAmount');
+amtInput.addEventListener('input', () => {
+  const n = parseNum(amtInput.value);
+  amtInput.value = n ? n.toLocaleString('id-ID') : '';
+  updateSummary();
+});
+document.getElementById('trxIncludeMe').onchange = updateSummary;
+document.getElementById('personName').addEventListener('keydown', e => { if (e.key === 'Enter') addPerson(); });
+
+// Orang
+function addPerson() {
+  const el = document.getElementById('personName');
+  const name = el.value.trim();
+  if (!name) return;
+  if (data.people.some(p => p.name.toLowerCase() === name.toLowerCase())) return alert('Nama sudah ada');
+  const person = { id: uid(), name };
+  data.people.push(person);
+  el.value = ''; save(); render();
+  enqueue({ action: 'addPerson', person });
+}
+function deletePerson(id) {
+  const bal = balances()[id];
+  if (!confirm(`Hapus ${personName(id)}?` + (bal > 0.5 ? `\nMasih ada hutang ${rp(bal)}.` : ''))) return;
+  data.people = data.people.filter(p => p.id !== id);
+  selected.delete(id); save(); render();
+  enqueue({ action: 'deletePerson', id });
+}
+
+// Transaksi
+function toggle(id) { selected.has(id) ? selected.delete(id) : selected.add(id); renderChips(); updateSummary(); }
+
+function calcSplit() {
+  const amount = parseNum(amtInput.value);
+  const includeMe = document.getElementById('trxIncludeMe').checked;
+  const count = selected.size + (includeMe ? 1 : 0);
+  return { amount, count, per: count ? amount / count : 0 };
+}
+function updateSummary() {
+  const { amount, count, per } = calcSplit();
+  const el = document.getElementById('trxSummary');
+  if (!amount || !selected.size) { el.innerHTML = 'Pilih orang & isi nominal.'; return; }
+  el.innerHTML = `Dibagi <b>${count} orang</b> → <b>${rp(per)}</b> / orang<br>
+    Hutang bertambah: ${[...selected].map(id => esc(personName(id))).join(', ')}`;
+}
+function addTransaction() {
+  const { amount, count, per } = calcSplit();
+  if (!amount) return alert('Isi nominal dulu');
+  if (!selected.size) return alert('Pilih minimal 1 orang');
+  const item = {
+    id: uid(), type: 'trx', date: Date.now(),
+    desc: document.getElementById('trxDesc').value.trim() || 'Transaksi',
+    amount, count,
+    shares: [...selected].map(id => ({ id, name: personName(id), amount: per }))
+  };
+  data.history.unshift(item); save();
+  amtInput.value = ''; document.getElementById('trxDesc').value = ''; selected.clear();
+  render();
+  enqueue({ action: 'addTrx', item });
+  alert(`Tersimpan! ${rp(per)} per orang`);
+}
+
+// Pembayaran
+function payDebt(id) {
+  const bal = balances()[id];
+  const input = prompt(`${personName(id)} bayar berapa?\nSisa hutang: ${rp(bal)}`, Math.round(bal));
+  if (input === null) return;
+  const amt = parseNum(input);
+  if (!amt) return;
+  const item = { id: uid(), type: 'pay', date: Date.now(), desc: 'Pembayaran', personId: id, name: personName(id), amount: amt };
+  data.history.unshift(item); save(); render();
+  enqueue({ action: 'addPay', item });
+}
+function deleteHistory(hid) {
+  if (!confirm('Hapus riwayat ini? Saldo akan dihitung ulang.')) return;
+  data.history = data.history.filter(h => h.id !== hid);
+  save(); render();
+  enqueue({ action: 'deleteHistory', id: hid });
+}
+
+// Backup / restore / reset
+function exportData() {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.download = 'backup-hutang.json'; a.click();
+}
+function importData(e) {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    try {
+      const d = JSON.parse(t); if (!d.people || !d.history) throw 0;
+      if (!confirm('Restore akan menimpa data di HP dan di Sheet. Lanjut?')) return;
+      data = d; save(); render();
+      enqueue({ action: 'replaceAll', data });
+      alert('Data dipulihkan');
+    } catch { alert('File tidak valid'); }
+  });
+  e.target.value = '';
+}
+function resetAll() {
+  if (!confirm('Hapus SEMUA data (di HP dan di Sheet)?')) return;
+  data = { people: [], history: [] }; selected.clear(); save(); render();
+  enqueue({ action: 'replaceAll', data });
+}
+function pushLocal() {
+  if (!config.url) return alert('Isi URL Web App dulu');
+  if (!confirm('Isi Sheet akan ditimpa dengan data di HP ini. Lanjut?')) return;
+  enqueue({ action: 'replaceAll', data });
+}
+
+/* ================= Render ================= */
+function renderChips() {
+  const el = document.getElementById('trxPeople');
+  el.innerHTML = data.people.length
+    ? data.people.map(p => `<div class="chip ${selected.has(p.id)?'on':''}" onclick="toggle('${p.id}')">${esc(p.name)}</div>`).join('')
+    : '<div class="empty">Belum ada orang. Tambah di tab Orang.</div>';
+}
+function render() {
+  const bal = balances();
+  const total = Object.values(bal).reduce((a, b) => a + Math.max(b, 0), 0);
+  document.getElementById('headerTotal').textContent = 'Total piutang: ' + rp(total);
+  renderChips(); updateSummary();
+
+  document.getElementById('peopleList').innerHTML = data.people.length
+    ? data.people.map(p => `<div class="list-item">
+        <div><div class="name">${esc(p.name)}</div><div class="sub">Hutang: ${rp(bal[p.id])}</div></div>
+        <button class="btn-sm btn-red" onclick="deletePerson('${p.id}')">Hapus</button></div>`).join('')
+    : '<div class="empty">Belum ada orang</div>';
+
+  document.getElementById('recapTotal').textContent = rp(total);
+  const sorted = [...data.people].sort((a, b) => bal[b.id] - bal[a.id]);
+  document.getElementById('recapList').innerHTML = sorted.length
+    ? sorted.map(p => `<div class="list-item">
+        <div><div class="name">${esc(p.name)}</div>
+        <div class="amt ${bal[p.id] > 0.5 ? 'pos' : 'zero'}">${bal[p.id] > 0.5 ? rp(bal[p.id]) : 'Lunas ✓'}</div></div>
+        ${bal[p.id] > 0.5 ? `<button class="btn-sm btn-green" onclick="payDebt('${p.id}')">Bayar</button>` : ''}</div>`).join('')
+    : '<div class="empty">Belum ada data</div>';
+
+  document.getElementById('historyList').innerHTML = data.history.length
+    ? data.history.map(h => h.type === 'trx'
+      ? `<div class="list-item"><div>
+          <div class="name">${esc(h.desc)} · ${rp(h.amount)}</div>
+          <div class="sub">${fmtDate(h.date)} · ${h.count} org · ${rp(h.shares[0] ? h.shares[0].amount : 0)}/org</div>
+          <div class="sub">${h.shares.map(s => esc(s.name || personName(s.id))).join(', ')}</div></div>
+          <button class="btn-sm btn-red" onclick="deleteHistory('${h.id}')">✕</button></div>`
+      : `<div class="list-item"><div>
+          <div class="name" style="color:#16a34a">💰 ${esc(h.name || personName(h.personId))} bayar ${rp(h.amount)}</div>
+          <div class="sub">${fmtDate(h.date)}</div></div>
+          <button class="btn-sm btn-red" onclick="deleteHistory('${h.id}')">✕</button></div>`).join('')
+    : '<div class="empty">Belum ada riwayat</div>';
+
+  document.getElementById('cfgUrl').value = config.url;
+  document.getElementById('cfgPin').value = config.pin;
+}
+
+render();
+updateStatus();
+pull(true); // ambil data terbaru dari Sheet saat app dibuka
+</script>
+</body>
+</html>
