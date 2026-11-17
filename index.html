@@ -31,24 +31,30 @@
   .name{font-weight:600}
   .sub{font-size:12px;color:#64748b;margin-top:2px}
   .amt{font-weight:700;white-space:nowrap}
-  .pos{color:#dc2626}.zero{color:#16a34a}
+  .pos{color:#dc2626}.zero{color:#16a34a}.neg{color:#0369a1}
   .chips{display:flex;flex-wrap:wrap;gap:8px}
   .chip{padding:9px 13px;border-radius:20px;border:1px solid #cbd5e1;background:#fff;font-size:14px;user-select:none}
   .chip.on{background:#2563eb;color:#fff;border-color:#2563eb}
   .summary{background:#eff6ff;border-radius:10px;padding:10px;margin-top:12px;font-size:14px;line-height:1.6}
   .total{font-size:26px;font-weight:800;color:#dc2626}
   .tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;display:flex;border-top:1px solid #e2e8f0;z-index:5}
-  .tabs button{flex:1;background:none;border-radius:0;padding:12px 4px;font-size:12px;color:#64748b;font-weight:500}
+  .tabs button{flex:1;background:none;border-radius:0;padding:12px 4px;font-size:12px;color:#64748b;font-weight:500;position:relative}
   .tabs button span{display:block;font-size:20px}
   .tabs button.active{color:#2563eb;font-weight:700}
+  .badge{position:absolute;top:6px;left:50%;margin-left:8px;background:#dc2626;color:#fff;font-size:10px;border-radius:10px;padding:1px 6px;display:none}
   .page{display:none}.page.active{display:block}
   .empty{color:#94a3b8;font-size:14px;text-align:center;padding:12px}
   .check{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px}
   .check input{width:20px;height:20px}
   .note{font-size:12px;color:#64748b;margin-top:8px;line-height:1.5}
   .banner{background:#fef3c7;color:#92400e;font-size:13px;padding:10px;border-radius:10px;margin-bottom:12px;display:none}
+  .pending{font-size:12px;color:#b45309;background:#fef3c7;border-radius:8px;padding:4px 8px;margin-top:4px;display:inline-block}
+  .paybox{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
+  .paybox input{width:22px;height:22px}
+  .actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
   /* Mode lihat saja (tanpa PIN) */
   body.readonly .edit-only{display:none !important}
+  body:not(.readonly) .view-only{display:none !important}
   .ro-badge{display:none;background:#e0f2fe;color:#075985;font-size:13px;padding:10px;border-radius:10px;margin-bottom:12px}
   body.readonly .ro-badge{display:block}
 </style>
@@ -63,7 +69,7 @@
 </header>
 
 <main>
-  <div class="ro-badge">👀 Mode lihat saja. Pemilik bisa isi PIN di tab <b>⚙️ Atur</b> untuk menambah/mengubah data.</div>
+  <div class="ro-badge">👀 Mode lihat saja. Centang <b>Sudah bayar</b> kalau kamu sudah transfer, nanti dikonfirmasi pemilik.</div>
   <div class="banner" id="setupBanner">Belum terhubung ke Google Sheets. Data masih tersimpan di HP saja. Atur di tab <b>⚙️ Atur</b>.</div>
 
   <!-- TRANSAKSI (khusus pemilik) -->
@@ -116,9 +122,12 @@
   <!-- PENGATURAN -->
   <section class="page" id="page-settings">
     <div class="card">
-      <h2>Google Sheets</h2>
-      <label>URL Web App (Apps Script)</label>
-      <input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec">
+      <h2 class="edit-only">Google Sheets</h2>
+      <h2 class="view-only">Masuk sebagai Pemilik</h2>
+      <div class="edit-only">
+        <label>URL Web App (Apps Script)</label>
+        <input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec">
+      </div>
       <label>PIN (khusus pemilik, untuk tambah/ubah data)</label>
       <input type="password" id="cfgPin" placeholder="Kosongkan untuk mode lihat saja" inputmode="numeric">
       <button class="btn" onclick="saveSettings()">Simpan & Hubungkan</button>
@@ -141,7 +150,7 @@
 <nav class="tabs">
   <button class="edit-only" data-page="trx"><span>🧾</span>Transaksi</button>
   <button data-page="people"><span>👥</span>Orang</button>
-  <button data-page="recap"><span>📊</span>Rekap</button>
+  <button data-page="recap"><span>📊</span>Rekap<i class="badge" id="reqBadge"></i></button>
   <button data-page="settings"><span>⚙️</span>Atur</button>
 </nav>
 
@@ -150,8 +159,10 @@
 const KEY = 'catatanHutang_v1';        // data (cache)
 const QKEY = 'catatanHutang_queue';    // antrian perubahan yang belum terkirim
 const CKEY = 'catatanHutang_config';   // URL + PIN
+const DKEY = 'catatanHutang_device';   // ID unik HP ini (untuk tandai/batal "sudah bayar")
 
 let data = JSON.parse(localStorage.getItem(KEY) || '{"people":[],"history":[]}');
+if (!data.requests) data.requests = [];
 let queue = JSON.parse(localStorage.getItem(QKEY) || '[]');
 
 // URL default untuk Web App (Apps Script) yang sudah dibuat
@@ -159,13 +170,18 @@ const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbzvXfOCzJ9M559B9ewN
 let config = JSON.parse(localStorage.getItem(CKEY) || '{"url":"","pin":""}');
 if (!config.url) config.url = DEFAULT_URL;
 
+let deviceId = localStorage.getItem(DKEY);
+if (!deviceId) { deviceId = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); localStorage.setItem(DKEY, deviceId); }
+
 let selected = new Set();
 let syncing = false;
+let busy = false; // untuk aksi publik (tandai sudah bayar)
 
 const isReadonly = () => !config.pin;
 const save = () => localStorage.setItem(KEY, JSON.stringify(data));
 const saveQueue = () => localStorage.setItem(QKEY, JSON.stringify(queue));
-const rp = n => 'Rp' + Math.round(n).toLocaleString('id-ID');
+const int = n => Math.round(Number(n) || 0);                 // semua nominal dibulatkan ke rupiah penuh
+const rp = n => 'Rp' + int(n).toLocaleString('id-ID');
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 const parseNum = s => Number(String(s).replace(/[^\d]/g,'')) || 0;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -183,19 +199,19 @@ function setStatus(text) { document.getElementById('syncBtn').textContent = text
 function updateStatus() {
   document.getElementById('setupBanner').style.display = config.url ? 'none' : 'block';
   if (!config.url) return setStatus('⚠ Lokal');
-  if (syncing) return setStatus('⏳ Menyimpan…');
-  if (queue.length) return setStatus(`⚠ ${queue.length} belum terkirim`);
-  setStatus(isReadonly() ? '👀 ⟳ Refresh' : '✓ Tersimpan');
+  if (syncing || busy) return setStatus('⏳ Memproses…');
+  if (queue.length && !isReadonly()) return setStatus(`⚠ ${queue.length} belum terkirim`);
+  setStatus(isReadonly() ? '⟳ Refresh' : '✓ Tersimpan');
 }
 
 async function api(method, payload, checkPin) {
   let res;
   if (method === 'GET') {
-    const q = `pin=${encodeURIComponent(config.pin || '')}${checkPin ? '&checkPin=1' : ''}&t=${Date.now()}`;
+    const q = `pin=${encodeURIComponent(config.pin || '')}${checkPin ? '&checkPin=1' : ''}&device=${encodeURIComponent(deviceId)}&t=${Date.now()}`;
     res = await fetch(`${config.url}?${q}`);
   } else {
     // text/plain supaya tidak kena CORS preflight di Apps Script
-    res = await fetch(config.url, { method: 'POST', body: JSON.stringify({ ...payload, pin: config.pin }) });
+    res = await fetch(config.url, { method: 'POST', body: JSON.stringify({ ...payload, pin: config.pin, device: deviceId }) });
   }
   const json = await res.json();
   if (!json.ok) throw new Error(json.error || 'Gagal');
@@ -214,7 +230,13 @@ async function flush() {
   syncing = true; updateStatus();
   try {
     while (queue.length) {
-      await api('POST', queue[0]);
+      try {
+        await api('POST', queue[0]);
+      } catch (e) {
+        // Request sudah diproses/dibatalkan duluan → buang dari antrian, jangan macet
+        if (/sudah diproses|tidak ditemukan/i.test(e.message)) { console.warn(e.message); }
+        else throw e;
+      }
       queue.shift(); saveQueue();
     }
   } catch (e) {
@@ -233,7 +255,8 @@ async function pull(silent) {
   try {
     syncing = true; setStatus('⏳ Memuat…');
     const res = await api('GET');
-    data = res.data; save(); render();
+    data = res.data; if (!data.requests) data.requests = [];
+    save(); render();
   } catch (e) {
     if (!silent) alert('Gagal memuat dari Sheet: ' + e.message);
   } finally {
@@ -262,16 +285,15 @@ async function saveSettings() {
     const remoteEmpty = !res.data.people.length && !res.data.history.length;
     const localHasData = data.people.length || data.history.length;
     if (pin && remoteEmpty && localHasData && confirm('Sheet masih kosong. Kirim data yang ada di HP ini ke Sheet?')) {
-      queue = [{ action: 'replaceAll', data }]; saveQueue();
+      queue = [{ action: 'replaceAll', data: { people: data.people, history: data.history } }]; saveQueue();
       await flush();
     } else {
       queue = []; saveQueue();
-      data = res.data; save();
+      data = res.data; if (!data.requests) data.requests = []; save();
     }
-    st.textContent = pin ? '✅ Terhubung (mode edit).' : '✅ Terhubung (mode lihat saja).';
+    st.textContent = pin ? '✅ Terhubung (mode pemilik).' : '✅ Terhubung (mode lihat saja).';
     if (pin) openTab('trx'); else render();
   } catch (e) {
-    // PIN salah → simpan tanpa PIN (mode lihat saja)
     if (String(e.message).includes('PIN')) {
       config = { url, pin: '' }; localStorage.setItem(CKEY, JSON.stringify(config));
       document.getElementById('cfgPin').value = '';
@@ -285,14 +307,17 @@ async function saveSettings() {
 }
 
 window.addEventListener('online', flush);
+// Refresh otomatis saat app dibuka lagi (supaya klaim "sudah bayar" terbaru kelihatan)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') pull(true); });
 
 /* ================= Logika hutang ================= */
+// Saldo selalu dalam rupiah penuh (integer), jadi bisa pas 0 saat lunas
 function balances() {
   const b = {};
   data.people.forEach(p => b[p.id] = 0);
   data.history.forEach(h => {
-    if (h.type === 'trx') h.shares.forEach(s => { if (s.id in b) b[s.id] += Number(s.amount); });
-    if (h.type === 'pay' && h.personId in b) b[h.personId] -= Number(h.amount);
+    if (h.type === 'trx') h.shares.forEach(s => { if (s.id in b) b[s.id] += int(s.amount); });
+    if (h.type === 'pay' && h.personId in b) b[h.personId] -= int(h.amount);
   });
   return b;
 }
@@ -300,6 +325,7 @@ function personName(id) {
   const p = (data.people || []).find(p => p.id === id);
   return p ? p.name : '(dihapus)';
 }
+const pendingFor = pid => (data.requests || []).find(r => r.personId === pid);
 
 // Tabs
 function openTab(page) {
@@ -335,7 +361,7 @@ function addPerson() {
 function deletePerson(id) {
   if (isReadonly()) return;
   const bal = balances()[id];
-  if (!confirm(`Hapus ${personName(id)}?` + (bal > 0.5 ? `\nMasih ada hutang ${rp(bal)}.` : ''))) return;
+  if (!confirm(`Hapus ${personName(id)}?` + (bal > 0 ? `\nMasih ada hutang ${rp(bal)}.` : ''))) return;
   data.people = data.people.filter(p => p.id !== id);
   selected.delete(id); save(); render();
   enqueue({ action: 'deletePerson', id });
@@ -344,45 +370,63 @@ function deletePerson(id) {
 // Transaksi
 function toggle(id) { selected.has(id) ? selected.delete(id) : selected.add(id); renderChips(); updateSummary(); }
 
+/**
+ * Pembagian dalam rupiah penuh, total selalu pas:
+ * - Ikut patungan → sisa pembagian (maks. count-1 rupiah) ditanggung saya.
+ * - Tidak ikut     → sisa dibagi +Rp1 ke beberapa orang pertama.
+ */
 function calcSplit() {
   const amount = parseNum(amtInput.value);
   const includeMe = document.getElementById('trxIncludeMe').checked;
-  const count = selected.size + (includeMe ? 1 : 0);
-  return { amount, count, per: count ? amount / count : 0 };
+  const ids = [...selected];
+  const count = ids.length + (includeMe ? 1 : 0);
+  if (!count || !amount) return { amount, count, includeMe, base: 0, rem: 0, shares: [] };
+  const base = Math.floor(amount / count);
+  const rem = amount - base * count;
+  const shares = ids.map((id, i) => ({ id, name: personName(id), amount: base + (!includeMe && i < rem ? 1 : 0) }));
+  return { amount, count, includeMe, base, rem, shares };
 }
 function updateSummary() {
-  const { amount, count, per } = calcSplit();
+  const { amount, count, includeMe, base, rem } = calcSplit();
   const el = document.getElementById('trxSummary');
   if (!amount || !selected.size) { el.innerHTML = 'Pilih orang & isi nominal.'; return; }
-  el.innerHTML = `Dibagi <b>${count} orang</b> → <b>${rp(per)}</b> / orang<br>
+  let extra = '';
+  if (rem) extra = includeMe
+    ? `<br><span class="sub">Sisa pembagian ${rp(rem)} ditanggung kamu (bagianmu ${rp(base + rem)}).</span>`
+    : `<br><span class="sub">Sisa pembagian: ${rem} orang pertama bayar +Rp1.</span>`;
+  el.innerHTML = `Dibagi <b>${count} orang</b> → <b>${rp(base)}</b> / orang${extra}<br>
     Hutang bertambah: ${[...selected].map(id => esc(personName(id))).join(', ')}`;
 }
 function addTransaction() {
   if (isReadonly()) return;
-  const { amount, count, per } = calcSplit();
+  const { amount, count, base, shares } = calcSplit();
   if (!amount) return alert('Isi nominal dulu');
   if (!selected.size) return alert('Pilih minimal 1 orang');
   const item = {
     id: uid(), type: 'trx', date: Date.now(),
     desc: document.getElementById('trxDesc').value.trim() || 'Transaksi',
-    amount, count,
-    shares: [...selected].map(id => ({ id, name: personName(id), amount: per }))
+    amount, count, shares
   };
   data.history.unshift(item); save();
   amtInput.value = ''; document.getElementById('trxDesc').value = ''; selected.clear();
   render();
   enqueue({ action: 'addTrx', item });
-  alert(`Tersimpan! ${rp(per)} per orang`);
+  alert(`Tersimpan! ${rp(base)} per orang`);
 }
 
-// Pembayaran
+// Pembayaran (pemilik) — tidak bisa melebihi sisa hutang
 function payDebt(id) {
   if (isReadonly()) return;
   const bal = balances()[id];
-  const input = prompt(`${personName(id)} bayar berapa?\nSisa hutang: ${rp(bal)}`, Math.round(bal));
+  if (bal <= 0) return;
+  const input = prompt(`${personName(id)} bayar berapa?\nSisa hutang: ${rp(bal)}`, bal);
   if (input === null) return;
-  const amt = parseNum(input);
+  let amt = parseNum(input);
   if (!amt) return;
+  if (amt > bal) {
+    if (!confirm(`Nominal ${rp(amt)} melebihi sisa hutang.\nCatat sebagai pelunasan ${rp(bal)}?`)) return;
+    amt = bal;
+  }
   const item = { id: uid(), type: 'pay', date: Date.now(), desc: 'Pembayaran', personId: id, name: personName(id), amount: amt };
   data.history.unshift(item); save(); render();
   enqueue({ action: 'addPay', item });
@@ -395,10 +439,65 @@ function deleteHistory(hid) {
   enqueue({ action: 'deleteHistory', id: hid });
 }
 
+/* ================= Klaim "Sudah bayar" (user tanpa PIN) ================= */
+async function publicAction(payload) {
+  if (!config.url) return alert('Belum terhubung ke Sheet.');
+  busy = true; updateStatus();
+  try {
+    await api('POST', payload);
+  } catch (e) {
+    alert('Gagal: ' + e.message);
+  } finally {
+    busy = false;
+    await pull(true);
+  }
+}
+function togglePaid(pid, checkbox) {
+  const req = pendingFor(pid);
+  if (checkbox.checked) {
+    const bal = balances()[pid];
+    if (!confirm(`Tandai ${personName(pid)} sudah bayar ${rp(bal)}?\nPemilik akan mengonfirmasi dulu.`)) { checkbox.checked = false; return; }
+    const r = { id: uid(), personId: pid, name: personName(pid), amount: bal, date: Date.now(), mine: true };
+    data.requests.push(r); render();
+    publicAction({ action: 'requestPay', req: { ...r, device: deviceId } });
+  } else {
+    if (!req) return;
+    if (!confirm('Batalkan tanda sudah bayar?')) { checkbox.checked = true; return; }
+    data.requests = data.requests.filter(x => x.id !== req.id); render();
+    publicAction({ action: 'cancelRequest', id: req.id });
+  }
+}
+
+// Pemilik: konfirmasi / tolak
+function confirmRequest(rid) {
+  if (isReadonly()) return;
+  const r = data.requests.find(x => x.id === rid); if (!r) return;
+  const bal = balances()[r.personId];
+  if (bal <= 0) {
+    if (confirm(`${r.name} sudah lunas. Tolak klaim ini?`)) rejectRequest(rid, true);
+    return;
+  }
+  const amt = Math.min(int(r.amount), bal);
+  if (!confirm(`Konfirmasi ${r.name} bayar ${rp(amt)}?`)) return;
+  const item = { id: uid(), type: 'pay', date: Date.now(), desc: 'Pembayaran (dikonfirmasi)', personId: r.personId, name: r.name, amount: amt };
+  data.history.unshift(item);
+  data.requests = data.requests.filter(x => x.id !== rid);
+  save(); render();
+  enqueue({ action: 'confirmRequest', id: rid, item });
+}
+function rejectRequest(rid, skipConfirm) {
+  if (isReadonly()) return;
+  const r = data.requests.find(x => x.id === rid); if (!r) return;
+  if (!skipConfirm && !confirm(`Tolak klaim bayar dari ${r.name}?`)) return;
+  data.requests = data.requests.filter(x => x.id !== rid);
+  save(); render();
+  enqueue({ action: 'rejectRequest', id: rid });
+}
+
 // Backup / restore / reset (khusus pemilik)
 function exportData() {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.href = URL.createObjectURL(new Blob([JSON.stringify({ people: data.people, history: data.history }, null, 2)], { type: 'application/json' }));
   a.download = 'backup-hutang.json'; a.click();
 }
 function importData(e) {
@@ -407,8 +506,8 @@ function importData(e) {
     try {
       const d = JSON.parse(t); if (!d.people || !d.history) throw 0;
       if (!confirm('Restore akan menimpa data di HP dan di Sheet. Lanjut?')) return;
-      data = d; save(); render();
-      enqueue({ action: 'replaceAll', data });
+      data = { people: d.people, history: d.history, requests: data.requests || [] }; save(); render();
+      enqueue({ action: 'replaceAll', data: { people: data.people, history: data.history } });
       alert('Data dipulihkan');
     } catch { alert('File tidak valid'); }
   });
@@ -417,22 +516,65 @@ function importData(e) {
 function resetAll() {
   if (isReadonly()) return;
   if (!confirm('Hapus SEMUA data (di HP dan di Sheet)?')) return;
-  data = { people: [], history: [] }; selected.clear(); save(); render();
-  enqueue({ action: 'replaceAll', data });
+  data = { people: [], history: [], requests: [] }; selected.clear(); save(); render();
+  enqueue({ action: 'replaceAll', data: { people: [], history: [] } });
 }
 function pushLocal() {
   if (isReadonly()) return;
   if (!config.url) return alert('Isi URL Web App dulu');
   if (!confirm('Isi Sheet akan ditimpa dengan data di HP ini. Lanjut?')) return;
-  enqueue({ action: 'replaceAll', data });
+  enqueue({ action: 'replaceAll', data: { people: data.people, history: data.history } });
 }
 
 /* ================= Render ================= */
+function balanceLabel(bal) {
+  if (bal > 0) return `<div class="amt pos">${rp(bal)}</div>`;
+  if (bal < 0) return `<div class="amt neg">Lebih bayar ${rp(-bal)}</div>`;
+  return `<div class="amt zero">Lunas ✓</div>`;
+}
+function shareLabel(h) {
+  const amts = h.shares.map(s => int(s.amount));
+  if (!amts.length) return rp(0);
+  const mn = Math.min(...amts), mx = Math.max(...amts);
+  return mn === mx ? rp(mn) : `${rp(mn)}–${rp(mx).replace('Rp','')}`;
+}
 function renderChips() {
   const el = document.getElementById('trxPeople');
   el.innerHTML = data.people.length
     ? data.people.map(p => `<div class="chip ${selected.has(p.id)?'on':''}" onclick="toggle('${p.id}')">${esc(p.name)}</div>`).join('')
     : '<div class="empty">Belum ada orang. Tambah di tab Orang.</div>';
+}
+function recapRow(p, bal) {
+  const req = pendingFor(p.id);
+  const ro = isReadonly();
+  let right = '';
+  let pendingInfo = '';
+
+  if (req) pendingInfo = `<div class="pending">⏳ Klaim sudah bayar ${rp(req.amount)} · menunggu konfirmasi</div>`;
+
+  if (ro) {
+    // User biasa: centang "Sudah bayar" (bisa dibatalkan dari HP yang sama)
+    if (req) {
+      right = `<label class="paybox"><input type="checkbox" checked ${req.mine ? '' : 'disabled'}
+        onchange="togglePaid('${p.id}', this)" ${busy ? 'disabled' : ''}> Sudah bayar</label>`;
+    } else if (bal > 0) {
+      right = `<label class="paybox"><input type="checkbox" onchange="togglePaid('${p.id}', this)" ${busy ? 'disabled' : ''}> Sudah bayar</label>`;
+    }
+  } else {
+    // Pemilik
+    const btns = [];
+    if (req) {
+      btns.push(`<button class="btn-sm btn-green" onclick="confirmRequest('${req.id}')">✓ Konfirmasi</button>`);
+      btns.push(`<button class="btn-sm btn-red" onclick="rejectRequest('${req.id}')">Tolak</button>`);
+    } else if (bal > 0) {
+      btns.push(`<button class="btn-sm btn-green" onclick="payDebt('${p.id}')">Bayar</button>`);
+    }
+    right = `<div class="actions">${btns.join('')}</div>`;
+  }
+
+  return `<div class="list-item">
+    <div><div class="name">${esc(p.name)}</div>${balanceLabel(bal)}${pendingInfo}</div>
+    ${right}</div>`;
 }
 function render() {
   document.body.classList.toggle('readonly', isReadonly());
@@ -442,31 +584,34 @@ function render() {
   document.getElementById('headerTotal').textContent = 'Total piutang: ' + rp(total);
   renderChips(); updateSummary();
 
+  const nReq = (data.requests || []).length;
+  const badge = document.getElementById('reqBadge');
+  badge.textContent = nReq; badge.style.display = (nReq && !isReadonly()) ? 'inline' : 'none';
+
   document.getElementById('peopleList').innerHTML = data.people.length
     ? data.people.map(p => `<div class="list-item">
-        <div><div class="name">${esc(p.name)}</div><div class="sub">Hutang: ${rp(bal[p.id])}</div></div>
+        <div><div class="name">${esc(p.name)}</div><div class="sub">${bal[p.id] < 0 ? 'Lebih bayar ' + rp(-bal[p.id]) : 'Hutang: ' + rp(bal[p.id])}</div></div>
         <button class="btn-sm btn-red edit-only" onclick="deletePerson('${p.id}')">Hapus</button></div>`).join('')
     : '<div class="empty">Belum ada orang</div>';
 
   document.getElementById('recapTotal').textContent = rp(total);
-  const sorted = [...data.people].sort((a, b) => bal[b.id] - bal[a.id]);
+  // Yang ada klaim pending ditaruh paling atas, lalu urut hutang terbesar
+  const sorted = [...data.people].sort((a, b) =>
+    (pendingFor(b.id) ? 1 : 0) - (pendingFor(a.id) ? 1 : 0) || bal[b.id] - bal[a.id]);
   document.getElementById('recapList').innerHTML = sorted.length
-    ? sorted.map(p => `<div class="list-item">
-        <div><div class="name">${esc(p.name)}</div>
-        <div class="amt ${bal[p.id] > 0.5 ? 'pos' : 'zero'}">${bal[p.id] > 0.5 ? rp(bal[p.id]) : 'Lunas ✓'}</div></div>
-        ${bal[p.id] > 0.5 ? `<button class="btn-sm btn-green edit-only" onclick="payDebt('${p.id}')">Bayar</button>` : ''}</div>`).join('')
+    ? sorted.map(p => recapRow(p, bal[p.id])).join('')
     : '<div class="empty">Belum ada data</div>';
 
   document.getElementById('historyList').innerHTML = data.history.length
     ? data.history.map(h => h.type === 'trx'
       ? `<div class="list-item"><div>
           <div class="name">${esc(h.desc)} · ${rp(h.amount)}</div>
-          <div class="sub">${fmtDate(h.date)} · ${h.count} org · ${rp(h.shares[0] ? h.shares[0].amount : 0)}/org</div>
+          <div class="sub">${fmtDate(h.date)} · ${h.count} org · ${shareLabel(h)}/org</div>
           <div class="sub">${h.shares.map(s => esc(s.name || personName(s.id))).join(', ')}</div></div>
           <button class="btn-sm btn-red edit-only" onclick="deleteHistory('${h.id}')">✕</button></div>`
       : `<div class="list-item"><div>
           <div class="name" style="color:#16a34a">💰 ${esc(h.name || personName(h.personId))} bayar ${rp(h.amount)}</div>
-          <div class="sub">${fmtDate(h.date)}</div></div>
+          <div class="sub">${fmtDate(h.date)}${h.desc && h.desc !== 'Pembayaran' ? ' · ' + esc(h.desc) : ''}</div></div>
           <button class="btn-sm btn-red edit-only" onclick="deleteHistory('${h.id}')">✕</button></div>`).join('')
     : '<div class="empty">Belum ada riwayat</div>';
 
