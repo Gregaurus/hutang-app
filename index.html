@@ -47,6 +47,10 @@
   .check input{width:20px;height:20px}
   .note{font-size:12px;color:#64748b;margin-top:8px;line-height:1.5}
   .banner{background:#fef3c7;color:#92400e;font-size:13px;padding:10px;border-radius:10px;margin-bottom:12px;display:none}
+  /* Mode lihat saja (tanpa PIN) */
+  body.readonly .edit-only{display:none !important}
+  .ro-badge{display:none;background:#e0f2fe;color:#075985;font-size:13px;padding:10px;border-radius:10px;margin-bottom:12px}
+  body.readonly .ro-badge{display:block}
 </style>
 </head>
 <body>
@@ -59,10 +63,11 @@
 </header>
 
 <main>
+  <div class="ro-badge">👀 Mode lihat saja. Pemilik bisa isi PIN di tab <b>⚙️ Atur</b> untuk menambah/mengubah data.</div>
   <div class="banner" id="setupBanner">Belum terhubung ke Google Sheets. Data masih tersimpan di HP saja. Atur di tab <b>⚙️ Atur</b>.</div>
 
-  <!-- TRANSAKSI -->
-  <section class="page active" id="page-trx">
+  <!-- TRANSAKSI (khusus pemilik) -->
+  <section class="page edit-only" id="page-trx">
     <div class="card">
       <h2>Transaksi Baru</h2>
       <label>Keterangan</label>
@@ -79,7 +84,7 @@
 
   <!-- ORANG -->
   <section class="page" id="page-people">
-    <div class="card">
+    <div class="card edit-only">
       <h2>Tambah Orang</h2>
       <div class="row">
         <input type="text" id="personName" placeholder="Nama orang">
@@ -114,12 +119,12 @@
       <h2>Google Sheets</h2>
       <label>URL Web App (Apps Script)</label>
       <input type="url" id="cfgUrl" placeholder="https://script.google.com/macros/s/.../exec">
-      <label>PIN (kosongkan kalau tidak pakai)</label>
-      <input type="password" id="cfgPin" placeholder="PIN" inputmode="numeric">
+      <label>PIN (khusus pemilik, untuk tambah/ubah data)</label>
+      <input type="password" id="cfgPin" placeholder="Kosongkan untuk mode lihat saja" inputmode="numeric">
       <button class="btn" onclick="saveSettings()">Simpan & Hubungkan</button>
       <p class="note" id="cfgStatus"></p>
     </div>
-    <div class="card">
+    <div class="card edit-only">
       <h2>Data</h2>
       <div class="row">
         <button class="btn-gray" style="flex:1" onclick="exportData()">Backup</button>
@@ -134,7 +139,7 @@
 </main>
 
 <nav class="tabs">
-  <button class="active" data-page="trx"><span>🧾</span>Transaksi</button>
+  <button class="edit-only" data-page="trx"><span>🧾</span>Transaksi</button>
   <button data-page="people"><span>👥</span>Orang</button>
   <button data-page="recap"><span>📊</span>Rekap</button>
   <button data-page="settings"><span>⚙️</span>Atur</button>
@@ -148,6 +153,7 @@ const CKEY = 'catatanHutang_config';   // URL + PIN
 
 let data = JSON.parse(localStorage.getItem(KEY) || '{"people":[],"history":[]}');
 let queue = JSON.parse(localStorage.getItem(QKEY) || '[]');
+
 // URL default untuk Web App (Apps Script) yang sudah dibuat
 const DEFAULT_URL = 'https://script.google.com/macros/s/AKfycbzvXfOCzJ9M559B9ewN1A30jKmexOVy0wWNHsx60MEIa7SyjkRaK1pzJtICfajyjvBD/exec';
 let config = JSON.parse(localStorage.getItem(CKEY) || '{"url":"","pin":""}');
@@ -156,6 +162,7 @@ if (!config.url) config.url = DEFAULT_URL;
 let selected = new Set();
 let syncing = false;
 
+const isReadonly = () => !config.pin;
 const save = () => localStorage.setItem(KEY, JSON.stringify(data));
 const saveQueue = () => localStorage.setItem(QKEY, JSON.stringify(queue));
 const rp = n => 'Rp' + Math.round(n).toLocaleString('id-ID');
@@ -178,13 +185,14 @@ function updateStatus() {
   if (!config.url) return setStatus('⚠ Lokal');
   if (syncing) return setStatus('⏳ Menyimpan…');
   if (queue.length) return setStatus(`⚠ ${queue.length} belum terkirim`);
-  setStatus('✓ Tersimpan');
+  setStatus(isReadonly() ? '👀 ⟳ Refresh' : '✓ Tersimpan');
 }
 
-async function api(method, payload) {
+async function api(method, payload, checkPin) {
   let res;
   if (method === 'GET') {
-    res = await fetch(`${config.url}?pin=${encodeURIComponent(config.pin || '')}&t=${Date.now()}`);
+    const q = `pin=${encodeURIComponent(config.pin || '')}${checkPin ? '&checkPin=1' : ''}&t=${Date.now()}`;
+    res = await fetch(`${config.url}?${q}`);
   } else {
     // text/plain supaya tidak kena CORS preflight di Apps Script
     res = await fetch(config.url, { method: 'POST', body: JSON.stringify({ ...payload, pin: config.pin }) });
@@ -194,12 +202,15 @@ async function api(method, payload) {
   return json;
 }
 
-// Tambah perubahan ke antrian lalu kirim
-function enqueue(op) { queue.push(op); saveQueue(); flush(); }
+// Tambah perubahan ke antrian lalu kirim (khusus pemilik / ada PIN)
+function enqueue(op) {
+  if (isReadonly()) { alert('Mode lihat saja. Isi PIN di tab Atur.'); return; }
+  queue.push(op); saveQueue(); flush();
+}
 
 // Kirim antrian satu per satu (urut), berhenti kalau gagal & coba lagi nanti
 async function flush() {
-  if (syncing || !config.url || !queue.length) return updateStatus();
+  if (syncing || !config.url || !queue.length || isReadonly()) return updateStatus();
   syncing = true; updateStatus();
   try {
     while (queue.length) {
@@ -208,7 +219,7 @@ async function flush() {
     }
   } catch (e) {
     console.warn('Sync gagal:', e);
-    if (String(e.message).includes('PIN')) alert('PIN salah. Cek di tab Atur.');
+    if (String(e.message).includes('PIN')) alert(e.message + '. Cek di tab Atur.');
   } finally {
     syncing = false; updateStatus();
   }
@@ -218,7 +229,7 @@ async function flush() {
 async function pull(silent) {
   if (!config.url) return;
   await flush();
-  if (queue.length) return; // masih ada yang belum terkirim, jangan timpa data lokal
+  if (queue.length && !isReadonly()) return; // masih ada yang belum terkirim, jangan timpa data lokal
   try {
     syncing = true; setStatus('⏳ Memuat…');
     const res = await api('GET');
@@ -236,31 +247,39 @@ function syncNow() {
 }
 
 async function saveSettings() {
-  const url = document.getElementById('cfgUrl').value.trim();
+  const url = document.getElementById('cfgUrl').value.trim() || DEFAULT_URL;
   const pin = document.getElementById('cfgPin').value.trim();
   const st = document.getElementById('cfgStatus');
-  if (url && !/^https:\/\/script\.google\.com\/.+\/exec/.test(url)) {
+  if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(url)) {
     st.textContent = '❌ URL harus berakhiran /exec dari Apps Script Web App.'; return;
   }
-  config = { url, pin }; localStorage.setItem(CKEY, JSON.stringify(config));
-  if (!url) { st.textContent = 'Mode lokal (tidak tersambung).'; updateStatus(); return; }
-
+  config = { url, pin };
   st.textContent = '⏳ Mengecek koneksi…';
   try {
-    const res = await api('GET');
+    const res = await api('GET', null, !!pin); // kalau ada PIN, sekalian dicek benar/salah
+    localStorage.setItem(CKEY, JSON.stringify(config));
+
     const remoteEmpty = !res.data.people.length && !res.data.history.length;
     const localHasData = data.people.length || data.history.length;
-    if (remoteEmpty && localHasData && confirm('Sheet masih kosong. Kirim data yang ada di HP ini ke Sheet?')) {
+    if (pin && remoteEmpty && localHasData && confirm('Sheet masih kosong. Kirim data yang ada di HP ini ke Sheet?')) {
       queue = [{ action: 'replaceAll', data }]; saveQueue();
       await flush();
     } else {
       queue = []; saveQueue();
       data = res.data; save();
     }
-    st.textContent = '✅ Terhubung ke Google Sheets.';
-    render();
+    st.textContent = pin ? '✅ Terhubung (mode edit).' : '✅ Terhubung (mode lihat saja).';
+    if (pin) openTab('trx'); else render();
   } catch (e) {
-    st.textContent = '❌ Gagal terhubung: ' + e.message;
+    // PIN salah → simpan tanpa PIN (mode lihat saja)
+    if (String(e.message).includes('PIN')) {
+      config = { url, pin: '' }; localStorage.setItem(CKEY, JSON.stringify(config));
+      document.getElementById('cfgPin').value = '';
+      st.textContent = '❌ ' + e.message + '. Tetap di mode lihat saja.';
+      render();
+    } else {
+      st.textContent = '❌ Gagal terhubung: ' + e.message;
+    }
   }
   updateStatus();
 }
@@ -284,6 +303,7 @@ function personName(id) {
 
 // Tabs
 function openTab(page) {
+  if (page === 'trx' && isReadonly()) page = 'recap';
   document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.page === page));
   document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + page));
   render();
@@ -302,6 +322,7 @@ document.getElementById('personName').addEventListener('keydown', e => { if (e.k
 
 // Orang
 function addPerson() {
+  if (isReadonly()) return;
   const el = document.getElementById('personName');
   const name = el.value.trim();
   if (!name) return;
@@ -312,6 +333,7 @@ function addPerson() {
   enqueue({ action: 'addPerson', person });
 }
 function deletePerson(id) {
+  if (isReadonly()) return;
   const bal = balances()[id];
   if (!confirm(`Hapus ${personName(id)}?` + (bal > 0.5 ? `\nMasih ada hutang ${rp(bal)}.` : ''))) return;
   data.people = data.people.filter(p => p.id !== id);
@@ -336,6 +358,7 @@ function updateSummary() {
     Hutang bertambah: ${[...selected].map(id => esc(personName(id))).join(', ')}`;
 }
 function addTransaction() {
+  if (isReadonly()) return;
   const { amount, count, per } = calcSplit();
   if (!amount) return alert('Isi nominal dulu');
   if (!selected.size) return alert('Pilih minimal 1 orang');
@@ -354,6 +377,7 @@ function addTransaction() {
 
 // Pembayaran
 function payDebt(id) {
+  if (isReadonly()) return;
   const bal = balances()[id];
   const input = prompt(`${personName(id)} bayar berapa?\nSisa hutang: ${rp(bal)}`, Math.round(bal));
   if (input === null) return;
@@ -364,13 +388,14 @@ function payDebt(id) {
   enqueue({ action: 'addPay', item });
 }
 function deleteHistory(hid) {
+  if (isReadonly()) return;
   if (!confirm('Hapus riwayat ini? Saldo akan dihitung ulang.')) return;
   data.history = data.history.filter(h => h.id !== hid);
   save(); render();
   enqueue({ action: 'deleteHistory', id: hid });
 }
 
-// Backup / restore / reset
+// Backup / restore / reset (khusus pemilik)
 function exportData() {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
@@ -390,11 +415,13 @@ function importData(e) {
   e.target.value = '';
 }
 function resetAll() {
+  if (isReadonly()) return;
   if (!confirm('Hapus SEMUA data (di HP dan di Sheet)?')) return;
   data = { people: [], history: [] }; selected.clear(); save(); render();
   enqueue({ action: 'replaceAll', data });
 }
 function pushLocal() {
+  if (isReadonly()) return;
   if (!config.url) return alert('Isi URL Web App dulu');
   if (!confirm('Isi Sheet akan ditimpa dengan data di HP ini. Lanjut?')) return;
   enqueue({ action: 'replaceAll', data });
@@ -408,6 +435,8 @@ function renderChips() {
     : '<div class="empty">Belum ada orang. Tambah di tab Orang.</div>';
 }
 function render() {
+  document.body.classList.toggle('readonly', isReadonly());
+
   const bal = balances();
   const total = Object.values(bal).reduce((a, b) => a + Math.max(b, 0), 0);
   document.getElementById('headerTotal').textContent = 'Total piutang: ' + rp(total);
@@ -416,7 +445,7 @@ function render() {
   document.getElementById('peopleList').innerHTML = data.people.length
     ? data.people.map(p => `<div class="list-item">
         <div><div class="name">${esc(p.name)}</div><div class="sub">Hutang: ${rp(bal[p.id])}</div></div>
-        <button class="btn-sm btn-red" onclick="deletePerson('${p.id}')">Hapus</button></div>`).join('')
+        <button class="btn-sm btn-red edit-only" onclick="deletePerson('${p.id}')">Hapus</button></div>`).join('')
     : '<div class="empty">Belum ada orang</div>';
 
   document.getElementById('recapTotal').textContent = rp(total);
@@ -425,7 +454,7 @@ function render() {
     ? sorted.map(p => `<div class="list-item">
         <div><div class="name">${esc(p.name)}</div>
         <div class="amt ${bal[p.id] > 0.5 ? 'pos' : 'zero'}">${bal[p.id] > 0.5 ? rp(bal[p.id]) : 'Lunas ✓'}</div></div>
-        ${bal[p.id] > 0.5 ? `<button class="btn-sm btn-green" onclick="payDebt('${p.id}')">Bayar</button>` : ''}</div>`).join('')
+        ${bal[p.id] > 0.5 ? `<button class="btn-sm btn-green edit-only" onclick="payDebt('${p.id}')">Bayar</button>` : ''}</div>`).join('')
     : '<div class="empty">Belum ada data</div>';
 
   document.getElementById('historyList').innerHTML = data.history.length
@@ -434,18 +463,19 @@ function render() {
           <div class="name">${esc(h.desc)} · ${rp(h.amount)}</div>
           <div class="sub">${fmtDate(h.date)} · ${h.count} org · ${rp(h.shares[0] ? h.shares[0].amount : 0)}/org</div>
           <div class="sub">${h.shares.map(s => esc(s.name || personName(s.id))).join(', ')}</div></div>
-          <button class="btn-sm btn-red" onclick="deleteHistory('${h.id}')">✕</button></div>`
+          <button class="btn-sm btn-red edit-only" onclick="deleteHistory('${h.id}')">✕</button></div>`
       : `<div class="list-item"><div>
           <div class="name" style="color:#16a34a">💰 ${esc(h.name || personName(h.personId))} bayar ${rp(h.amount)}</div>
           <div class="sub">${fmtDate(h.date)}</div></div>
-          <button class="btn-sm btn-red" onclick="deleteHistory('${h.id}')">✕</button></div>`).join('')
+          <button class="btn-sm btn-red edit-only" onclick="deleteHistory('${h.id}')">✕</button></div>`).join('')
     : '<div class="empty">Belum ada riwayat</div>';
 
   document.getElementById('cfgUrl').value = config.url;
   document.getElementById('cfgPin').value = config.pin;
 }
 
-render();
+// Halaman awal: pemilik → Transaksi, tanpa PIN → Rekap
+openTab(isReadonly() ? 'recap' : 'trx');
 updateStatus();
 pull(true); // ambil data terbaru dari Sheet saat app dibuka
 </script>
