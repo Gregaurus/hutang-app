@@ -25,6 +25,7 @@
   .btn-blue{background:#2563eb;color:#fff}
   .btn-red{background:#fee2e2;color:#b91c1c}
   .btn-gray{background:#e2e8f0;color:#0f172a}
+  .btn-outline{background:#fff;color:#b91c1c;border:1px solid #fca5a5}
   .row{display:flex;gap:8px;align-items:center}
   .row input{flex:1}
   .list-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #f1f5f9;gap:8px}
@@ -50,8 +51,6 @@
   .note{font-size:12px;color:#64748b;margin-top:8px;line-height:1.5}
   .banner{background:#fef3c7;color:#92400e;font-size:13px;padding:10px;border-radius:10px;margin-bottom:12px;display:none}
   .pending{font-size:12px;color:#b45309;background:#fef3c7;border-radius:8px;padding:4px 8px;margin-top:4px;display:inline-block}
-  .paybox{display:flex;align-items:center;gap:6px;font-size:13px;white-space:nowrap}
-  .paybox input{width:22px;height:22px}
   .actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
   /* Info transfer */
   .bank{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;border-radius:14px;padding:14px}
@@ -213,7 +212,7 @@ const BANK = { name: 'BCA', number: '6043625841', holder: 'A.N. Gregorius V.A.' 
 const KEY = 'catatanHutang_v1';        // data (cache)
 const QKEY = 'catatanHutang_queue';    // antrian perubahan yang belum terkirim
 const CKEY = 'catatanHutang_config';   // URL + PIN
-const DKEY = 'catatanHutang_device';   // ID unik HP ini (untuk tandai/batal "sudah bayar")
+const DKEY = 'catatanHutang_device';   // ID unik HP ini (untuk klaim/batal "sudah bayar")
 
 let data = JSON.parse(localStorage.getItem(KEY) || '{"people":[],"history":[]}');
 if (!data.requests) data.requests = [];
@@ -229,7 +228,7 @@ if (!deviceId) { deviceId = 'd' + Date.now().toString(36) + Math.random().toStri
 
 let selected = new Set();
 let syncing = false;
-let busy = false; // untuk aksi publik (tandai sudah bayar)
+let busy = false; // untuk aksi publik (klaim/batal sudah bayar)
 let payCtx = { pid: null, amount: 0 };
 
 const isReadonly = () => !config.pin;
@@ -265,12 +264,9 @@ async function copyText(text, msg) {
   toast('✓ ' + (msg || 'Disalin'));
 }
 function fillBank() {
-  ['', 'm'].forEach(pre => {
-    const k = s => document.getElementById(pre ? pre + s : s.charAt(0).toLowerCase() + s.slice(1));
-    k('BankName').textContent = BANK.name;
-    k('BankNumber').textContent = BANK.number.replace(/(\d{4})(?=\d)/g, '$1 ');
-    k('BankHolder').textContent = BANK.holder;
-  });
+  const num = BANK.number.replace(/(\d{4})(?=\d)/g, '$1 ');
+  [['bankName', 'mBankName', BANK.name], ['bankNumber', 'mBankNumber', num], ['bankHolder', 'mBankHolder', BANK.holder]]
+    .forEach(([a, b, v]) => { document.getElementById(a).textContent = v; document.getElementById(b).textContent = v; });
 }
 
 /* ================= Sinkronisasi Google Sheets ================= */
@@ -522,7 +518,7 @@ function deleteHistory(hid) {
 /* ================= Klaim "Sudah bayar" (user tanpa PIN) ================= */
 async function publicAction(payload) {
   if (!config.url) return alert('Belum terhubung ke Sheet.');
-  busy = true; updateStatus();
+  busy = true; updateStatus(); render();
   try {
     await api('POST', payload);
   } catch (e) {
@@ -539,18 +535,14 @@ function submitPaid(pid) {
   data.requests.push(r); render();
   publicAction({ action: 'requestPay', req: { ...r, device: deviceId } });
 }
-function togglePaid(pid, checkbox) {
+// Batalkan klaim "sudah bayar" (hanya dari HP yang membuat klaim)
+function cancelPaid(pid) {
   const req = pendingFor(pid);
-  if (checkbox.checked) {
-    const bal = balances()[pid];
-    if (!confirm(`Tandai ${personName(pid)} sudah bayar ${rp(bal)}?\nPemilik akan mengonfirmasi dulu.`)) { checkbox.checked = false; return; }
-    submitPaid(pid);
-  } else {
-    if (!req) return;
-    if (!confirm('Batalkan tanda sudah bayar?')) { checkbox.checked = true; return; }
-    data.requests = data.requests.filter(x => x.id !== req.id); render();
-    publicAction({ action: 'cancelRequest', id: req.id });
-  }
+  if (!req || !req.mine || busy) return;
+  if (!confirm(`Batalkan klaim sudah bayar ${rp(req.amount)} untuk ${personName(pid)}?`)) return;
+  data.requests = data.requests.filter(x => x.id !== req.id); render();
+  publicAction({ action: 'cancelRequest', id: req.id });
+  toast('Klaim dibatalkan');
 }
 
 // Popup bayar (info transfer)
@@ -660,16 +652,15 @@ function recapRow(p, bal) {
   if (req) pendingInfo = `<div class="pending">⏳ Klaim sudah bayar ${rp(req.amount)} · menunggu konfirmasi</div>`;
 
   if (ro) {
-    // User biasa: belum bayar → tombol 💳 Bayar saja.
-    // Setelah klik "Saya sudah transfer" → otomatis tercentang "Sudah bayar" (bisa dibatalkan dari HP yang sama).
-    const parts = [];
+    // User biasa:
+    // - belum bayar → tombol 💳 Bayar
+    // - sudah klaim dari HP ini → tombol ✕ Batalkan
+    // - klaim dari HP lain → cukup label menunggu konfirmasi
     if (req) {
-      parts.push(`<label class="paybox"><input type="checkbox" checked ${req.mine && !busy ? '' : 'disabled'}
-        onchange="togglePaid('${p.id}', this)"> Sudah bayar</label>`);
+      if (req.mine) right = `<button class="btn-sm btn-outline" onclick="cancelPaid('${p.id}')" ${busy ? 'disabled' : ''}>✕ Batalkan</button>`;
     } else if (bal > 0) {
-      parts.push(`<button class="btn-sm btn-blue" onclick="openPay('${p.id}')">💳 Bayar</button>`);
+      right = `<button class="btn-sm btn-blue" onclick="openPay('${p.id}')">💳 Bayar</button>`;
     }
-    right = `<div class="actions">${parts.join('')}</div>`;
   } else {
     // Pemilik
     const btns = [];
@@ -679,12 +670,12 @@ function recapRow(p, bal) {
     } else if (bal > 0) {
       btns.push(`<button class="btn-sm btn-green" onclick="payDebt('${p.id}')">Bayar</button>`);
     }
-    right = `<div class="actions">${btns.join('')}</div>`;
+    right = btns.join('');
   }
 
   return `<div class="list-item">
     <div><div class="name">${esc(p.name)}</div>${balanceLabel(bal)}${pendingInfo}</div>
-    ${right}</div>`;
+    <div class="actions">${right}</div></div>`;
 }
 function render() {
   document.body.classList.toggle('readonly', isReadonly());
