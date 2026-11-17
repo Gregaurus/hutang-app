@@ -85,7 +85,7 @@
 </header>
 
 <main>
-  <div class="ro-badge">👀 Mode lihat saja. Klik <b>💳 Bayar</b> untuk info transfer, lalu tandai <b>Sudah bayar</b>. Nanti dikonfirmasi pemilik.</div>
+  <div class="ro-badge">👀 Mode lihat saja. Klik <b>💳 Bayar</b> untuk info transfer. Setelah transfer, klik <b>Saya sudah transfer</b>. Nanti dikonfirmasi pemilik.</div>
   <div class="banner" id="setupBanner">Belum terhubung ke Google Sheets. Data masih tersimpan di HP saja. Atur di tab <b>⚙️ Atur</b>.</div>
 
   <!-- TRANSAKSI (khusus pemilik) -->
@@ -660,14 +660,14 @@ function recapRow(p, bal) {
   if (req) pendingInfo = `<div class="pending">⏳ Klaim sudah bayar ${rp(req.amount)} · menunggu konfirmasi</div>`;
 
   if (ro) {
-    // User biasa: tombol 💳 Bayar (info transfer) + centang "Sudah bayar"
+    // User biasa: belum bayar → tombol 💳 Bayar saja.
+    // Setelah klik "Saya sudah transfer" → otomatis tercentang "Sudah bayar" (bisa dibatalkan dari HP yang sama).
     const parts = [];
     if (req) {
       parts.push(`<label class="paybox"><input type="checkbox" checked ${req.mine && !busy ? '' : 'disabled'}
         onchange="togglePaid('${p.id}', this)"> Sudah bayar</label>`);
     } else if (bal > 0) {
       parts.push(`<button class="btn-sm btn-blue" onclick="openPay('${p.id}')">💳 Bayar</button>`);
-      parts.push(`<label class="paybox"><input type="checkbox" onchange="togglePaid('${p.id}', this)" ${busy ? 'disabled' : ''}> Sudah bayar</label>`);
     }
     right = `<div class="actions">${parts.join('')}</div>`;
   } else {
